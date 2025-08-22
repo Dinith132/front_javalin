@@ -32,6 +32,17 @@
     },
     "android": {
       "package": "com.dinithp132.boltexponativewind"
+    },
+    "permissions": {
+      "camera": {
+        "ios": {
+          "NSCameraUsageDescription": "This app uses the camera to record javelin throws for analysis.",
+          "NSMicrophoneUsageDescription": "This app uses the microphone to record audio with video."
+        },
+        "android": {
+          "permissions": ["android.permission.RECORD_AUDIO","android.permission.CAMERA" ]
+        }
+      }
     }
   }
 }
