@@ -82,6 +82,11 @@ export default function ProcessingScreen() {
       interval = setInterval(async () => {
         console.log("============before complete==================")
         try {
+          console.log("==========================")
+          console.log(fileId)
+          console.log(statusUrl)
+          console.log("==========================")
+
           const response = await axios.get(`${BASE_URL}${statusUrl}`);
           console.log("===========================")
           console.log(response.data)

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,7 +7,7 @@ import { Video, ResizeMode } from 'expo-av';
 import * as Speech from 'expo-speech';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
-import { ArrowLeft, Play, Pause, Volume2, Download, Share2, RotateCcw, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Circle as XCircle } from 'lucide-react-native';
+import { ArrowLeft, Play, Pause, Volume2, Download, Share2, RotateCcw, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Circle as XCircle, Maximize2, Minimize2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 // Define the interface for the analysis results
@@ -22,9 +22,12 @@ export default function FeedbackScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioPlayed, setAudioPlayed] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const videoRef = useRef<Video>(null);
 
-  const analysisResults: AnalysisResults | null = results ? JSON.parse(results as string) : null;
+  // Stabilize videoUri and results to prevent unnecessary re-renders
+  const videoUriString = useMemo(() => Array.isArray(videoUri) ? videoUri[0] : videoUri, [videoUri]);
+  const analysisResults: AnalysisResults | null = useMemo(() => results ? JSON.parse(results as string) : null, [results]);
 
   useEffect(() => {
     if (analysisResults && !audioPlayed) {
@@ -107,12 +110,38 @@ export default function FeedbackScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    if (isPlaying) {
-      await videoRef.current.pauseAsync();
-    } else {
-      await videoRef.current.playAsync();
+    try {
+      if (isPlaying) {
+        await videoRef.current.pauseAsync();
+      } else {
+        await videoRef.current.playAsync();
+      }
+      setIsPlaying(!isPlaying);
+    } catch (error) {
+      console.error('Video toggle error:', error);
+      Alert.alert('Error', 'Failed to toggle video playback.');
     }
-    setIsPlaying(!isPlaying);
+  };
+
+  const toggleFullscreen = async () => {
+    if (!videoRef.current) return;
+
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    try {
+      if (isFullscreen) {
+        await videoRef.current.dismissFullscreenPlayer();
+        setIsFullscreen(false);
+      } else {
+        await videoRef.current.presentFullscreenPlayer();
+        setIsFullscreen(true);
+      }
+    } catch (error) {
+      console.error('Fullscreen toggle error:', error);
+      Alert.alert('Error', 'Failed to toggle fullscreen mode.');
+    }
   };
 
   const shareResults = async () => {
@@ -121,27 +150,25 @@ export default function FeedbackScreen() {
       return;
     }
 
-    if (Platform.OS === 'web') {
+    if (!Sharing.isAvailableAsync()) {
       Alert.alert('Sharing not supported', 'Sharing is not available on web.');
       return;
     }
 
     try {
-      // Ensure videoUri is a string
-      const videoUriString = Array.isArray(videoUri) ? videoUri[0] : videoUri;
-
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-      const localUri = videoUriString?.startsWith('file://') 
-        ? videoUri 
-        : `${FileSystem.cacheDirectory}tempVideo.mp4`;
-
-      const localUriString=Array.isArray(localUri) ? localUri[0] : localUri;
-      if (!videoUriString?.startsWith('file://')) {
-        await FileSystem.downloadAsync(videoUriString, localUriString);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
 
-      await Sharing.shareAsync(localUriString, {
+      const localUri = videoUriString?.startsWith('file://') 
+        ? videoUriString 
+        : `${FileSystem.cacheDirectory}tempVideo.mp4`;
+
+      if (!videoUriString?.startsWith('file://')) {
+        await FileSystem.downloadAsync(videoUriString, localUri);
+      }
+
+      await Sharing.shareAsync(localUri, {
         dialogTitle: 'Share Javelin Analysis',
       });
     } catch (error) {
@@ -164,10 +191,10 @@ export default function FeedbackScreen() {
     router.push('/preview');
   };
 
-  if (!analysisResults) {
+  if (!analysisResults || !videoUriString) {
     return (
       <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>No analysis results available</Text>
+        <Text style={styles.errorText}>No analysis results or video available</Text>
       </View>
     );
   }
@@ -185,32 +212,49 @@ export default function FeedbackScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/preview')}>
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={styles.title}>Analysis Results</Text>
+          <Text style={styles.title}>Analysis Resultsdwid</Text>
           <View style={styles.placeholder} />
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-          <View style={styles.videoContainer}>
-            {videoUri && (
-              <Video
-                ref={videoRef}
-                source={{ uri: videoUri as string }}
-                style={styles.video}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={false}
-                isLooping={true}
-                onPlaybackStatusUpdate={(status) => {
-                  if ('isPlaying' in status) setIsPlaying(status.isPlaying || false);
-                }}
-              />
-            )}
+          <View style={[styles.videoContainer, isFullscreen && { height: '100%' }]}>
+            <Video
+              ref={videoRef}
+              source={{ uri: videoUriString }}
+              style={styles.video}
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay={isPlaying}
+              isLooping={true}
+              onPlaybackStatusUpdate={(status) => {
+                console.log('Playback status:', status);
+                if ('isPlaying' in status) {
+                  setIsPlaying(status.isPlaying || false);
+                }
+                if (status.isLoaded && !status.isPlaying && status.positionMillis === status.durationMillis) {
+                  console.log('Video finished, should loop');
+                  if (!isPlaying) {
+                    videoRef.current?.replayAsync().catch((error) => {
+                      console.error('Replay error:', error);
+                    });
+                  }
+                } else if ('error' in status && status.error) {
+                  console.error('Video playback error:', status.error);
+                  Alert.alert('Error', 'Video playback failed.');
+                }
+              }}
+            />
             <View style={styles.videoOverlay}>
-              <TouchableOpacity style={styles.playButton} onPress={toggleVideo}>
-                {isPlaying ? <Pause size={32} color="#ffffff" /> : <Play size={32} color="#ffffff" />}
-              </TouchableOpacity>
-            </View>
-            <View style={styles.overlayInfo}>
-              <Text style={styles.overlayText}>Video with pose overlay</Text>
+              <View style={styles.controlsContainer}>
+                <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
+                  {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
+                  {isFullscreen ? <Minimize2 size={24} color="#ffffff" /> : <Maximize2 size={24} color="#ffffff" />}
+                </TouchableOpacity>
+              </View>
+              <View style={styles.overlayInfo}>
+                <Text style={styles.overlayText}>Video with pose overlay</Text>
+              </View>
             </View>
           </View>
 
@@ -253,7 +297,7 @@ export default function FeedbackScreen() {
                         styles.probabilityFill,
                         { 
                           width: `${probability * 100}%`,
-                          backgroundColor: technique === analysisResults.prediction ? resultColor : '#64748b'
+                          backgroundColor: technique === analysisResults.prediction ? resultColor : '#64748b',
                         }
                       ]}
                     />
@@ -286,41 +330,219 @@ export default function FeedbackScreen() {
   );
 }
 
-// --- styles stay the same ---
+// Styles
 const styles = StyleSheet.create({
   container: { flex: 1 },
   safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
-  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255, 255, 255, 0.1)', justifyContent: 'center', alignItems: 'center' },
-  title: { fontSize: 20, fontFamily: 'Inter-SemiBold', color: '#ffffff' },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 20, 
+    paddingVertical: 16 
+  },
+  backButton: { 
+    width: 40, 
+    height: 40, 
+    borderRadius: 20, 
+    backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  title: { 
+    fontSize: 20, 
+    fontFamily: 'Inter-SemiBold', 
+    color: '#ffffff' 
+  },
   placeholder: { width: 40 },
-  scrollView: { flex: 1, paddingHorizontal: 20 },
-  videoContainer: { position: 'relative', height: 250, backgroundColor: '#000000', borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
-  video: { width: '100%', height: '100%' },
-  videoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' },
-  playButton: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', alignItems: 'center' },
-  overlayInfo: { position: 'absolute', bottom: 10, left: 10, backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-  overlayText: { fontSize: 12, fontFamily: 'Inter-Medium', color: '#ffffff' },
-  resultContainer: { backgroundColor: '#ffffff', borderRadius: 16, marginBottom: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
-  resultHeader: { flexDirection: 'row', alignItems: 'center', padding: 20 },
-  resultContent: { marginLeft: 16, flex: 1 },
-  resultTitle: { fontSize: 22, fontFamily: 'Inter-Bold', color: '#ffffff' },
-  confidenceText: { fontSize: 14, fontFamily: 'Inter-Medium', color: 'rgba(255, 255, 255, 0.9)', marginTop: 2 },
-  feedbackSection: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
-  feedbackTitle: { fontSize: 18, fontFamily: 'Inter-SemiBold', color: '#1a202c', marginBottom: 12 },
-  feedbackText: { fontSize: 16, fontFamily: 'Inter-Regular', color: '#4a5568', lineHeight: 24, marginBottom: 16 },
-  audioButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f7fafc', borderRadius: 8, paddingVertical: 12, paddingHorizontal: 16, borderWidth: 1, borderColor: '#e2e8f0' },
-  audioButtonText: { fontSize: 14, fontFamily: 'Inter-Medium', color: '#3182ce', marginLeft: 8 },
-  probabilitiesSection: { padding: 20 },
-  probabilitiesTitle: { fontSize: 18, fontFamily: 'Inter-SemiBold', color: '#1a202c', marginBottom: 16 },
-  probabilityItem: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  techniqueLabel: { fontSize: 14, fontFamily: 'Inter-Medium', color: '#4a5568', width: 120 },
-  probabilityBar: { flex: 1, height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, marginHorizontal: 12 },
-  probabilityFill: { height: '100%', borderRadius: 4 },
-  probabilityText: { fontSize: 14, fontFamily: 'Inter-SemiBold', color: '#1a202c', width: 40, textAlign: 'right' },
-  actionButtons: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 20, paddingVertical: 20, borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.1)' },
-  secondaryButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.1)', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16 },
-  secondaryButtonText: { fontSize: 14, fontFamily: 'Inter-Medium', color: '#ffffff', marginLeft: 6 },
-  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a365d' },
-  errorText: { fontSize: 18, fontFamily: 'Inter-Medium', color: '#ffffff' },
+  scrollView: { 
+    flex: 1, 
+    paddingHorizontal: 20 
+  },
+  videoContainer: { 
+    position: 'relative', 
+    height: 250, 
+    backgroundColor: '#000', 
+    borderRadius: 16, 
+    overflow: 'hidden', 
+    marginBottom: 20 
+  },
+  video: { 
+    width: '100%', 
+    height: '100%' 
+  },
+  videoOverlay: { 
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0,
+    justifyContent: 'flex-end',
+  },
+  controlsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 10,
+    marginRight: 10,
+  },
+  controlButton: {
+    padding: 8,
+    marginLeft: 8,
+    borderRadius: 20,
+  },
+  overlayInfo: { 
+    position: 'absolute', 
+    top: 10, 
+    left: 10, 
+    backgroundColor: 'rgba(0,0,0,0.6)', 
+    paddingHorizontal: 8, 
+    paddingVertical: 4, 
+    borderRadius: 4 
+  },
+  overlayText: { 
+    fontSize: 12, 
+    fontFamily: 'Inter-Medium', 
+    color: '#fff' 
+  },
+  resultContainer: { 
+    backgroundColor: '#fff', 
+    borderRadius: 16, 
+    marginBottom: 20, 
+    overflow: 'hidden', 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 4 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 8, 
+    elevation: 4 
+  },
+  resultHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    padding: 20 
+  },
+  resultContent: { 
+    marginLeft: 16, 
+    flex: 1 
+  },
+  resultTitle: { 
+    fontSize: 22, 
+    fontFamily: 'Inter-Bold', 
+    color: '#fff' 
+  },
+  confidenceText: { 
+    fontSize: 14, 
+    fontFamily: 'Inter-Medium', 
+    color: 'rgba(255,255,255,0.9)', 
+    marginTop: 2 
+  },
+  feedbackSection: { 
+    padding: 20, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#e2e8f0' 
+  },
+  feedbackTitle: { 
+    fontSize: 18, 
+    fontFamily: 'Inter-SemiBold', 
+    color: '#1a202c', 
+    marginBottom: 12 
+  },
+  feedbackText: { 
+    fontSize: 16, 
+    fontFamily: 'Inter-Regular', 
+    color: '#4a5568', 
+    lineHeight: 24, 
+    marginBottom: 16 
+  },
+  audioButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#f7fafc', 
+    borderRadius: 8, 
+    paddingVertical: 12, 
+    paddingHorizontal: 16, 
+    borderWidth: 1, 
+    borderColor: '#e2e8f0' 
+  },
+  audioButtonText: { 
+    fontSize: 14, 
+    fontFamily: 'Inter-Medium', 
+    color: '#3182ce', 
+    marginLeft: 8 
+  },
+  probabilitiesSection: { 
+    padding: 20 
+  },
+  probabilitiesTitle: { 
+    fontSize: 18, 
+    fontFamily: 'Inter-SemiBold', 
+    color: '#1a202c', 
+    marginBottom: 16 
+  },
+  probabilityItem: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 12 
+  },
+  techniqueLabel: { 
+    fontSize: 14, 
+    fontFamily: 'Inter-Medium', 
+    color: '#4a5568', 
+    width: 120 
+  },
+  probabilityBar: { 
+    flex: 1, 
+    height: 8, 
+    backgroundColor: '#e2e8f0', 
+    borderRadius: 4, 
+    marginHorizontal: 12 
+  },
+  probabilityFill: { 
+    height: '100%', 
+    borderRadius: 4 
+  },
+  probabilityText: { 
+    fontSize: 14, 
+    fontFamily: 'Inter-SemiBold', 
+    color: '#1a202c', 
+    width: 40, 
+    textAlign: 'right' 
+  },
+  actionButtons: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-around', 
+    paddingHorizontal: 20, 
+    paddingVertical: 20, 
+    borderTopWidth: 1, 
+    borderTopColor: 'rgba(255,255,255,0.1)' 
+  },
+  secondaryButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    borderRadius: 12, 
+    paddingVertical: 12, 
+    paddingHorizontal: 16 
+  },
+  secondaryButtonText: { 
+    fontSize: 14, 
+    fontFamily: 'Inter-Medium', 
+    color: '#fff', 
+    marginLeft: 6 
+  },
+  errorContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    backgroundColor: '#1a365d' 
+  },
+  errorText: { 
+    fontSize: 18, 
+    fontFamily: 'Inter-Medium', 
+    color: '#fff' 
+  },
 });

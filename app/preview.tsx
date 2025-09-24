@@ -1,29 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Video, ResizeMode } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
-import { ArrowLeft, Play, Upload, RotateCcw } from 'lucide-react-native';
+import { ArrowLeft, Play, Pause, Upload, RotateCcw } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { BASE_URL } from '@/src/config';
 import axios from 'axios';
-
 
 export default function PreviewScreen() {
   const { videoUri } = useLocalSearchParams();
   const [selectedVideo, setSelectedVideo] = useState<string | null>(videoUri as string || null);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [progress, setProgress] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoRef = useRef<Video>(null);
 
   useEffect(() => {
     if (!videoUri) {
       pickVideo();
     }
   }, [videoUri]);
-
-  // At the top, before your component
 
   const pickVideo = async () => {
     if (Platform.OS === 'web') {
@@ -32,10 +32,6 @@ export default function PreviewScreen() {
       input.accept = 'video/*';
       input.onchange = async (event: any) => {
         const file = event.target.files[0];
-        if (file && file.size > 100 * 1024 * 1024) {
-          Alert.alert('Error', 'Video file is too large. Please select a smaller file.');
-          return;
-        }
         if (file) {
           const uri = URL.createObjectURL(file);
           setSelectedVideo(uri);
@@ -75,6 +71,26 @@ export default function PreviewScreen() {
     }
   };
 
+  const toggleVideo = async () => {
+    if (!videoRef.current) return;
+
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+
+    try {
+      if (isPlaying) {
+        await videoRef.current.pauseAsync();
+      } else {
+        await videoRef.current.playAsync();
+      }
+      setIsPlaying(!isPlaying);
+    } catch (error) {
+      console.error('Video toggle error:', error);
+      Alert.alert('Error', 'Failed to toggle video playback.');
+    }
+  };
+
   const analyzeVideo = async () => {
     if (!selectedVideo) {
       Alert.alert('Error', 'No video selected.');
@@ -87,6 +103,7 @@ export default function PreviewScreen() {
 
     setIsLoading(true);
     setStatusMessage('Uploading video...');
+    setProgress(0);
 
     try {
       const formData = new FormData();
@@ -124,13 +141,15 @@ export default function PreviewScreen() {
 
       console.log('Uploading video:', { uri: selectedVideo, mimeType, fileName });
 
-      // const BASE_IP = 'http://10.104.0.221:5000';
-
       const response = await axios.post(`${BASE_URL}/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 30000,
+        timeout: 300000,
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
+          setProgress(percentCompleted);
+        },
       });
 
       if (response.status === 202) {
@@ -153,6 +172,7 @@ export default function PreviewScreen() {
       );
     } finally {
       setIsLoading(false);
+      setProgress(0);
     }
   };
 
@@ -161,6 +181,11 @@ export default function PreviewScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     setStatusMessage('');
+    setProgress(0);
+    setIsPlaying(false);
+    if (videoRef.current) {
+      videoRef.current.stopAsync().catch((error) => console.error('Stop video error:', error));
+    }
     pickVideo();
   };
 
@@ -185,15 +210,26 @@ export default function PreviewScreen() {
           {selectedVideo ? (
             <View style={styles.videoContainer}>
               <Video
+                ref={videoRef}
                 source={{ uri: selectedVideo }}
                 style={styles.video}
                 resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={false}
-                isLooping={false}
-                useNativeControls
+                shouldPlay={isPlaying}
+                isLooping={true}
+                onPlaybackStatusUpdate={(status) => {
+                  if ('isPlaying' in status) {
+                    setIsPlaying(status.isPlaying || false);
+                  }
+                  if (status.isLoaded === false && status.error) {
+                    console.error('Video playback error:', status.error);
+                    Alert.alert('Error', 'Video playback failed.');
+                  }
+                }}
               />
-              <View style={styles.videoOverlay}>
-                <Play size={48} color="#ffffff" />
+              <View style={styles.controlsContainer}>
+                <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
+                  {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
+                </TouchableOpacity>
               </View>
             </View>
           ) : (
@@ -208,6 +244,14 @@ export default function PreviewScreen() {
             <Text style={styles.infoText}>
               {statusMessage || 'Our AI will analyze your javelin throw technique and provide detailed feedback on your form, arm position, and leg blocking.'}
             </Text>
+            {isLoading && (
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${progress/2}%` }]} />
+                </View>
+                <Text style={styles.progressText}>{progress/2}%</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.buttonContainer}>
@@ -276,7 +320,7 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     position: 'relative',
-    height: 300,
+    height: 330,
     backgroundColor: '#000000',
     borderRadius: 16,
     overflow: 'hidden',
@@ -284,17 +328,21 @@ const styles = StyleSheet.create({
   },
   video: {
     width: '100%',
-    height: '100%',
+    height: 300,
   },
-  videoOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  controlsContainer: {
+    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  controlButton: {
+    padding: 8,
+    borderRadius: 20,
   },
   placeholderContainer: {
     height: 300,
@@ -330,6 +378,28 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Regular',
     color: '#e2e8f0',
     lineHeight: 20,
+  },
+  progressContainer: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  progressBar: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#3182ce',
+    borderRadius: 4,
+  },
+  progressText: {
+    marginTop: 8,
+    fontSize: 14,
+    fontFamily: 'Inter-Medium',
+    color: '#ffffff',
   },
   buttonContainer: {
     marginTop: 'auto',
