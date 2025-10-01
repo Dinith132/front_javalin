@@ -17,6 +17,7 @@ export default function PreviewScreen() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [disableControls, setDisableControls] = useState(false); // 👈 new state
   const videoRef = useRef<Video>(null);
 
   useEffect(() => {
@@ -44,7 +45,6 @@ export default function PreviewScreen() {
     }
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
     if (status !== 'granted') {
       Alert.alert(
         'Permission Required',
@@ -97,6 +97,17 @@ export default function PreviewScreen() {
       return;
     }
 
+    // 👇 Stop video and disable controls
+    if (videoRef.current) {
+      try {
+        await videoRef.current.stopAsync();
+        setIsPlaying(false);
+        setDisableControls(true);
+      } catch (error) {
+        console.error('Error stopping video:', error);
+      }
+    }
+
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
@@ -113,7 +124,7 @@ export default function PreviewScreen() {
       if (Platform.OS === 'web') {
         const response = await fetch(selectedVideo);
         const blob = await response.blob();
-        
+
         if (selectedVideo.endsWith('.mov')) {
           mimeType = 'video/quicktime';
           fileName = 'video.mov';
@@ -142,9 +153,7 @@ export default function PreviewScreen() {
       console.log('Uploading video:', { uri: selectedVideo, mimeType, fileName });
 
       const response = await axios.post(`${BASE_URL}/upload`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 300000,
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
@@ -183,6 +192,7 @@ export default function PreviewScreen() {
     setStatusMessage('');
     setProgress(0);
     setIsPlaying(false);
+    setDisableControls(false); // 👈 re-enable controls
     if (videoRef.current) {
       videoRef.current.stopAsync().catch((error) => console.error('Stop video error:', error));
     }
@@ -190,16 +200,10 @@ export default function PreviewScreen() {
   };
 
   return (
-    <LinearGradient
-      colors={['#1a365d', '#2d5a87']}
-      style={styles.container}
-    >
+    <LinearGradient colors={['#1a365d', '#2d5a87']} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
           <Text style={styles.title}>Preview Video</Text>
@@ -227,9 +231,11 @@ export default function PreviewScreen() {
                 }}
               />
               <View style={styles.controlsContainer}>
-                <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
-                  {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
-                </TouchableOpacity>
+                {!disableControls && (
+                  <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
+                    {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           ) : (
@@ -242,14 +248,15 @@ export default function PreviewScreen() {
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Ready for Analysis</Text>
             <Text style={styles.infoText}>
-              {statusMessage || 'Our AI will analyze your javelin throw technique and provide detailed feedback on your form, arm position, and leg blocking.'}
+              {statusMessage ||
+                'Our AI will analyze your javelin throw technique and provide detailed feedback on your form, arm position, and leg blocking.'}
             </Text>
             {isLoading && (
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: `${progress/2}%` }]} />
+                  <View style={[styles.progressFill, { width: `${progress / 2}%` }]} />
                 </View>
-                <Text style={styles.progressText}>{progress/2}%</Text>
+                <Text style={styles.progressText}>{progress / 2}%</Text>
               </View>
             )}
           </View>
@@ -270,10 +277,7 @@ export default function PreviewScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={selectDifferentVideo}
-            >
+            <TouchableOpacity style={styles.secondaryButton} onPress={selectDifferentVideo}>
               <RotateCcw size={20} color="#3182ce" />
               <Text style={styles.secondaryButtonText}>Select Different Video</Text>
             </TouchableOpacity>
@@ -320,7 +324,7 @@ const styles = StyleSheet.create({
   },
   videoContainer: {
     position: 'relative',
-    height: 330,
+    height: 350,
     backgroundColor: '#000000',
     borderRadius: 16,
     overflow: 'hidden',

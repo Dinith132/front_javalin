@@ -7,10 +7,14 @@ import { Video, ResizeMode } from 'expo-av';
 import * as Speech from 'expo-speech';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
-import { ArrowLeft, Play, Pause, Volume2, Download, Share2, RotateCcw, CircleCheck as CheckCircle, TriangleAlert as AlertTriangle, Circle as XCircle, Maximize2, Minimize2 } from 'lucide-react-native';
+import { 
+  ArrowLeft, Play, Pause, Volume2, Download, Share2, 
+  RotateCcw, CircleCheck as CheckCircle, 
+  TriangleAlert as AlertTriangle, Circle as XCircle, 
+  Maximize2, Minimize2 
+} from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
-// Define the interface for the analysis results
 interface AnalysisResults {
   prediction: string;
   confidence: number;
@@ -23,12 +27,71 @@ export default function FeedbackScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioPlayed, setAudioPlayed] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [cachedVideoUri, setCachedVideoUri] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isVideoLoading, setIsVideoLoading] = useState(true); // New state for video loading
   const videoRef = useRef<Video>(null);
 
-  // Stabilize videoUri and results to prevent unnecessary re-renders
-  const videoUriString = useMemo(() => Array.isArray(videoUri) ? videoUri[0] : videoUri, [videoUri]);
-  const analysisResults: AnalysisResults | null = useMemo(() => results ? JSON.parse(results as string) : null, [results]);
+  // Stabilize videoUri and results
+  const videoUriString = useMemo(
+    () => Array.isArray(videoUri) ? videoUri[0] : videoUri,
+    [videoUri]
+  );
+  const analysisResults: AnalysisResults | null = useMemo(
+    () => results ? JSON.parse(results as string) : null,
+    [results]
+  );
 
+  // 🔹 Cache video with unique filename
+  useEffect(() => {
+    const cacheVideo = async () => {
+      try {
+        if (!videoUriString) return;
+
+        // Generate unique filename from the URL (safe for cache)
+        const fileName = videoUriString.split('/').pop()?.split('?')[0] || 'video.mp4';
+        const localUri = `${FileSystem.cacheDirectory}${fileName}`;
+
+        const fileInfo = await FileSystem.getInfoAsync(localUri);
+
+        if (fileInfo.exists) {
+          setCachedVideoUri(localUri);
+          setIsVideoLoading(false);
+        } else {
+          setIsDownloading(true);
+          const downloadResumable = FileSystem.createDownloadResumable(
+            videoUriString,
+            localUri,
+            {},
+            (downloadProgress) => {
+              const progress = downloadProgress.totalBytesExpectedToWrite > 0
+                ? downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite
+                : 0;
+              setDownloadProgress(progress);
+            }
+          );
+          const downloadResult = await downloadResumable.downloadAsync();
+          if (downloadResult && downloadResult.uri) {
+            setCachedVideoUri(downloadResult.uri);
+          } else {
+            console.error("Download failed or returned no URI.");
+            setCachedVideoUri(videoUriString); // Fallback to original URI
+          }
+          setIsDownloading(false);
+          setIsVideoLoading(false);
+        }
+      } catch (error) {
+        console.error("Video caching error:", error);
+        setCachedVideoUri(videoUriString); // fallback
+        setIsDownloading(false);
+        setIsVideoLoading(false);
+      }
+    };
+    cacheVideo();
+  }, [videoUriString]);
+
+  // 🔹 Play audio feedback once
   useEffect(() => {
     if (analysisResults && !audioPlayed) {
       setTimeout(() => {
@@ -75,14 +138,11 @@ export default function FeedbackScreen() {
 
   const playAudioFeedback = async () => {
     if (!analysisResults) return;
-
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-
     const feedbackText = generateFeedbackText(analysisResults.prediction);
     setIsSpeaking(true);
-
     try {
       await Speech.speak(feedbackText, {
         language: 'en-US',
@@ -105,11 +165,9 @@ export default function FeedbackScreen() {
 
   const toggleVideo = async () => {
     if (!videoRef.current) return;
-
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-
     try {
       if (isPlaying) {
         await videoRef.current.pauseAsync();
@@ -125,11 +183,9 @@ export default function FeedbackScreen() {
 
   const toggleFullscreen = async () => {
     if (!videoRef.current) return;
-
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-
     try {
       if (isFullscreen) {
         await videoRef.current.dismissFullscreenPlayer();
@@ -149,26 +205,15 @@ export default function FeedbackScreen() {
       Alert.alert('Error', 'No analysis results available to share.');
       return;
     }
-
     if (!Sharing.isAvailableAsync()) {
       Alert.alert('Sharing not supported', 'Sharing is not available on web.');
       return;
     }
-
     try {
       if (Platform.OS !== 'web') {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
-
-      const localUri = videoUriString?.startsWith('file://') 
-        ? videoUriString 
-        : `${FileSystem.cacheDirectory}tempVideo.mp4`;
-
-      if (!videoUriString?.startsWith('file://')) {
-        await FileSystem.downloadAsync(videoUriString, localUri);
-      }
-
-      await Sharing.shareAsync(localUri, {
+      await Sharing.shareAsync(cachedVideoUri || videoUriString, {
         dialogTitle: 'Share Javelin Analysis',
       });
     } catch (error) {
@@ -188,7 +233,7 @@ export default function FeedbackScreen() {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
-    router.push('/preview');
+    router.push('../index');
   };
 
   if (!analysisResults || !videoUriString) {
@@ -203,61 +248,79 @@ export default function FeedbackScreen() {
   const resultColor = getResultColor(analysisResults.prediction);
 
   return (
-    <LinearGradient
-      colors={['#1a365d', '#2d5a87']}
-      style={styles.container}
-    >
+    <LinearGradient colors={['#1a365d', '#2d5a87']} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/preview')}>
+
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={styles.title}>Analysis Resultsdwid</Text>
-          <View style={styles.placeholder} />
+          <Text style={styles.title}>Analysis Results</Text>
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <View style={[styles.videoContainer, isFullscreen && { height: '100%' }]}>
-            <Video
-              ref={videoRef}
-              source={{ uri: videoUriString }}
-              style={styles.video}
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={isPlaying}
-              isLooping={true}
-              onPlaybackStatusUpdate={(status) => {
-                console.log('Playback status:', status);
-                if ('isPlaying' in status) {
-                  setIsPlaying(status.isPlaying || false);
-                }
-                if (status.isLoaded && !status.isPlaying && status.positionMillis === status.durationMillis) {
-                  console.log('Video finished, should loop');
-                  if (!isPlaying) {
-                    videoRef.current?.replayAsync().catch((error) => {
-                      console.error('Replay error:', error);
-                    });
-                  }
-                } else if ('error' in status && status.error) {
-                  console.error('Video playback error:', status.error);
-                  Alert.alert('Error', 'Video playback failed.');
-                }
-              }}
-            />
-            <View style={styles.videoOverlay}>
-              <View style={styles.controlsContainer}>
-                <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
-                  {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
-                  {isFullscreen ? <Minimize2 size={24} color="#ffffff" /> : <Maximize2 size={24} color="#ffffff" />}
-                </TouchableOpacity>
+            {isDownloading ? (
+              <View style={styles.loadingOverlay}>
+                <Text style={styles.loadingText}>Downloading Video...</Text>
+                <View style={styles.progressBarBackground}>
+                  <View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} />
+                </View>
+                <Text style={styles.loadingText}>{Math.round(downloadProgress * 100)}%</Text>
               </View>
-              <View style={styles.overlayInfo}>
-                <Text style={styles.overlayText}>Video with pose overlay</Text>
+            ) : isVideoLoading ? (
+              <View style={styles.loadingOverlay}>
+                <Text style={styles.loadingText}>Loading Video...</Text>
               </View>
-            </View>
+            ) : (
+              <>
+                <Video
+                  ref={videoRef}
+                  source={{ uri: cachedVideoUri || videoUriString }}
+                  style={styles.video}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={isPlaying}
+                  isLooping={true}
+                  // Removed onLoadStart to prevent resetting loading state after caching
+                  onLoad={() => setIsVideoLoading(false)}
+                  onError={(error) => {
+                    console.error('Video load error:', error);
+                    setIsVideoLoading(false);
+                    Alert.alert('Video Error', 'Failed to load video. Please try again.');
+                  }}
+                  onPlaybackStatusUpdate={(status) => {
+                    if ('isPlaying' in status) {
+                      setIsPlaying(status.isPlaying || false);
+                    }
+                    if (status.isLoaded && !status.isPlaying && status.positionMillis === status.durationMillis) {
+                      videoRef.current?.replayAsync().catch((error) => {
+                        console.error('Replay error:', error);
+                      });
+                    } else if ('error' in status && status.error) {
+                      console.error('Video playback error:', status.error);
+                      Alert.alert('Error', 'Video playback failed.');
+                      setIsVideoLoading(false); // Ensure loading state is reset on error
+                    }
+                  }}
+                />
+                <View style={styles.videoOverlay}>
+                  <View style={styles.controlsContainer}>
+                    <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
+                      {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
+                      {isFullscreen ? <Minimize2 size={24} color="#ffffff" /> : <Maximize2 size={24} color="#ffffff" />}
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.overlayInfo}>
+                    <Text style={styles.overlayText}>Video with pose overlay</Text>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
 
+          {/* Results Section */}
           <View style={styles.resultContainer}>
             <View style={[styles.resultHeader, { backgroundColor: resultColor }]}>
               <ResultIcon size={32} color="#ffffff" />
@@ -309,6 +372,7 @@ export default function FeedbackScreen() {
           </View>
         </ScrollView>
 
+        {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity style={styles.secondaryButton} onPress={shareResults}>
             <Share2 size={20} color="#3182ce" />
@@ -544,5 +608,34 @@ const styles = StyleSheet.create({
     fontSize: 18, 
     fontFamily: 'Inter-Medium', 
     color: '#fff' 
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    fontFamily: 'Inter-Medium',
+    color: '#fff',
+    marginBottom: 10,
+  },
+  progressBarBackground: {
+    width: '80%',
+    height: 10,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#3182ce',
+    borderRadius: 5,
   },
 });
