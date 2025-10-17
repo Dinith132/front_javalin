@@ -30,7 +30,7 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.content}>
-          <View style={styles.statsContainer}>
+          {/* <View style={styles.statsContainer}>
             <View style={styles.statCard}>
               <TrendingUp size={32} color="#000000ff" />
               <Text style={styles.statNumber}>12</Text>
@@ -41,7 +41,7 @@ export default function HomeScreen() {
               <Text style={styles.statNumber}>8</Text>
               <Text style={styles.statLabel}>Good Techniques</Text>
             </View>
-          </View>
+          </View> */}
 
           <View style={styles.actionContainer}>
             <TouchableOpacity
