@@ -86,8 +86,13 @@ export default function ProcessingScreen() {
           console.log(fileId)
           console.log(statusUrl)
           console.log("==========================")
+          // const response = await axios.get(`${BASE_URL}${statusUrl}`);
+          const response = await axios.get(`${BASE_URL}${statusUrl}`, {
+            headers: {
+              "ngrok-skip-browser-warning": "true"
+            }
+          });
 
-          const response = await axios.get(`${BASE_URL}${statusUrl}`);
           console.log("===========================")
           console.log(response.data)
           console.log("-----------------")
@@ -110,7 +115,7 @@ export default function ProcessingScreen() {
           } else if (response.data.status === 'processing') {
             setStatusMessage(response.data.message);
           } else {
-            throw new Error(response.data.error || 'Processing failed');
+            // throw new Error(response.data.error || 'Processing failed');
           }
         } catch (error: any) {
           console.error('Status check error:', error);
