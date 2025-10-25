@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { RotateCcw, Square, StopCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system';
@@ -15,15 +15,30 @@ export default function CameraScreen() {
   const [cameraReady, setCameraReady] = useState(false);
 
   const cameraRef = useRef<CameraView | null>(null);
-  // recordingPromiseRef holds the promise returned by recordAsync so we can await it when stopping
   const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
   const startTimeRef = useRef<number | null>(null);
-  
+  // Add a state for camera key to force remount
+  const [cameraKey, setCameraKey] = useState(Date.now().toString());
 
   const handleCameraReady = useCallback(() => {
     console.log('Camera is ready');
     setCameraReady(true);
   }, []);
+
+  // Reset camera state when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('CameraScreen focused, resetting camera state');
+      setCameraReady(false);
+      setCameraKey(Date.now().toString()); // Force CameraView remount
+      return () => {
+        console.log('CameraScreen unfocused, cleaning up');
+        (async () => {
+          await safeReleaseCamera();
+        })();
+      };
+    }, [])
+  );
 
   // Mount -> unmount cleanup (run once). Release camera resources here.
   useEffect(() => {
@@ -33,13 +48,11 @@ export default function CameraScreen() {
       (async () => {
         try {
           if (cameraRef.current) {
-            // Stop recording if somehow still recording
             try {
               await cameraRef.current.stopRecording?.();
             } catch (e) {
               // stopRecording may throw if not recording; ignore
             }
-            // Pause preview and release ref so textures can be freed
             try {
               await cameraRef.current.pausePreview?.();
             } catch (e) {
@@ -53,7 +66,7 @@ export default function CameraScreen() {
         }
       })();
     };
-  }, []); // run only on mount/unmount
+  }, []);
 
   if (!cameraPermission || !microphonePermission) {
     return <View style={styles.container} />;
@@ -91,10 +104,6 @@ export default function CameraScreen() {
     );
   }
 
-  /**
-   * Utility to safely teardown camera preview and clear ref.
-   * Await this before navigation or heavy memory work (like video playback).
-   */
   const safeReleaseCamera = async () => {
     try {
       if (!cameraRef.current) return;
@@ -114,12 +123,10 @@ export default function CameraScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
 
-    // If recording currently, stop and finalize recording before switching
     if (isRecording && cameraRef.current) {
       try {
         console.log('Stopping recording before switching camera...');
         await cameraRef.current.stopRecording?.();
-        // Wait for the recordAsync promise to resolve so buffers get cleaned
         if (recordingPromiseRef.current) {
           try {
             await recordingPromiseRef.current;
@@ -136,11 +143,9 @@ export default function CameraScreen() {
       }
     }
 
-    // release camera previews so switching doesn't keep both textures alive
-    await safeReleaseCamera();
-
     setFacing((current) => (current === 'back' ? 'front' : 'back'));
     setCameraReady(false);
+    setCameraKey(Date.now().toString()); // Force remount on camera flip
   };
 
   const startRecording = async () => {
@@ -154,9 +159,7 @@ export default function CameraScreen() {
     try {
       setIsRecording(true);
       startTimeRef.current = Date.now();
-      // create the recording promise and store it for later awaiting
       console.log('Calling recordAsync with maxDuration: 30');
-      // note: options may vary by expo-camera version; keep minimal
       recordingPromiseRef.current = cameraRef.current.recordAsync({ maxDuration: 30 });
       console.log('Recording promise stored');
     } catch (error) {
@@ -177,7 +180,6 @@ export default function CameraScreen() {
     const elapsed = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
     console.log('Elapsed ms:', elapsed);
 
-    // If too short, still stop but don't proceed to preview
     if (elapsed < 1000) {
       console.log('Recording too short; stopping and informing user');
       try {
@@ -201,17 +203,14 @@ export default function CameraScreen() {
     }
 
     try {
-      // Stop the camera recording and wait for the final video uri
       console.log('Stopping recording and awaiting final video');
       await cameraRef.current.stopRecording?.();
 
       let video = null;
       if (recordingPromiseRef.current) {
-        // await the record promise (it returns { uri })
         video = await recordingPromiseRef.current;
       }
 
-      // Clear recording state
       setIsRecording(false);
       recordingPromiseRef.current = null;
       startTimeRef.current = null;
@@ -224,15 +223,12 @@ export default function CameraScreen() {
 
       console.log('Video recorded:', video.uri);
 
-      // Run file size check and copy logic within try/catch
       try {
         const fileInfo = await FileSystem.getInfoAsync(video.uri);
         console.log('Original file info:', fileInfo);
 
-        // Release camera resources BEFORE navigating to preview or loading video
         await safeReleaseCamera();
 
-        // If large file, avoid copying to reduce memory pressure; pass original uri
         if (fileInfo.exists && 'size' in fileInfo && fileInfo.size && fileInfo.size > 50 * 1024 * 1024) {
           console.log('Large file (>50MB) detected, using original URI');
           let finalUri = video.uri;
@@ -243,7 +239,6 @@ export default function CameraScreen() {
           return;
         }
 
-        // For small files, copy to app document directory
         const fileName = `javelin_throw_${Date.now()}.mp4`;
         const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -257,12 +252,10 @@ export default function CameraScreen() {
         router.push({ pathname: '/preview', params: { videoUri: permanentUri } });
       } catch (copyError) {
         console.error('Error copying video or preparing preview:', copyError);
-        // On copy error, attempt to still navigate with the original URI (safe-guard)
         let finalUri = video.uri;
         if (Platform.OS === 'android' && !finalUri.startsWith('file://')) {
           finalUri = `file://${finalUri}`;
         }
-        // ensure camera is released before navigation
         await safeReleaseCamera();
         router.push({ pathname: '/preview', params: { videoUri: finalUri } });
       }
@@ -279,6 +272,7 @@ export default function CameraScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <CameraView
+          key={cameraKey} // Use cameraKey to force remount
           style={styles.camera}
           facing={facing}
           mode="video"
@@ -288,22 +282,26 @@ export default function CameraScreen() {
           }}
           onCameraReady={handleCameraReady}
           ratio="16:9"
-          // Lowered default quality to 480p for better memory headroom.
           videoQuality="480p"
-          // keep bitrate moderate; feel free to tune
           videoBitrate={600000}
         >
           <View style={styles.overlay}>
             <View style={styles.topBar}>
-              <TouchableOpacity style={styles.closeButton} onPress={async () => {
-                // ensure camera paused when leaving screen
-                await safeReleaseCamera();
-                router.back();
-              }}>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={async () => {
+                  await safeReleaseCamera();
+                  router.back();
+                }}
+              >
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
               <Text style={styles.title}>Record Throw</Text>
-              <TouchableOpacity style={styles.flipButton} onPress={toggleCameraFacing} disabled={!cameraReady}>
+              <TouchableOpacity
+                style={styles.flipButton}
+                onPress={toggleCameraFacing}
+                disabled={!cameraReady}
+              >
                 <RotateCcw size={24} color={cameraReady ? '#ffffff' : '#666666'} />
               </TouchableOpacity>
             </View>
@@ -345,8 +343,8 @@ export default function CameraScreen() {
     console.error('CameraView render error:', e);
     return (
       <SafeAreaView style={styles.container}>
-        <View style={{flex:1,justifyContent:'center',alignItems:'center'}}>
-          <Text style={{color:'#fff'}}>Camera failed to initialize.</Text>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ color: '#fff' }}>Camera failed to initialize.</Text>
         </View>
       </SafeAreaView>
     );
