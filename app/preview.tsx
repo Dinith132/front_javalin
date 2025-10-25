@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, BackHandler } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -19,6 +19,18 @@ export default function PreviewScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [disableControls, setDisableControls] = useState(false); // 👈 new state
   const videoRef = useRef<Video>(null);
+
+  // 🔹 Handle hardware back button
+  useEffect(() => {
+    const backAction = () => {
+      router.replace('/');
+      return true; // Prevent default behavior
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
+    return () => backHandler.remove();
+  }, []);
 
   useEffect(() => {
     console.log('Preview component mounted, videoUri:', videoUri);

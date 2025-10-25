@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, BackHandler } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -100,6 +100,18 @@ export default function FeedbackScreen() {
       }, 1000);
     }
   }, [analysisResults]);
+
+  // 🔹 Handle hardware back button
+  useEffect(() => {
+    const backAction = () => {
+      router.push('/');
+      return true; // Prevent default behavior
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
+    return () => backHandler.remove();
+  }, []);
 
   const getResultColor = (prediction: string) => {
     switch (prediction) {
@@ -252,7 +264,7 @@ export default function FeedbackScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
 
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.push('/')}>
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
           <Text style={styles.title}>Analysis Results</Text>
