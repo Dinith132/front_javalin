@@ -21,8 +21,23 @@ export default function PreviewScreen() {
   const videoRef = useRef<Video>(null);
 
   useEffect(() => {
+    console.log('Preview component mounted, videoUri:', videoUri);
     if (!videoUri) {
+      console.log('No videoUri provided, picking video');
       pickVideo();
+    } else {
+      console.log('VideoUri provided:', videoUri);
+      // Decode the URI if it's URL-encoded
+      const decodedUri = decodeURIComponent(videoUri as string);
+      console.log('Decoded videoUri:', decodedUri);
+
+      // For Android, ensure proper file:// protocol
+      const finalUri = Platform.OS === 'android' && !decodedUri.startsWith('file://')
+        ? `file://${decodedUri}`
+        : decodedUri;
+
+      console.log('Final videoUri for preview:', finalUri);
+      setSelectedVideo(finalUri);
     }
   }, [videoUri]);
 
@@ -221,11 +236,13 @@ export default function PreviewScreen() {
                 shouldPlay={isPlaying}
                 isLooping={true}
                 onPlaybackStatusUpdate={(status) => {
+                  console.log('Video playback status:', status);
                   if ('isPlaying' in status) {
                     setIsPlaying(status.isPlaying || false);
                   }
                   if (status.isLoaded === false && status.error) {
                     console.error('Video playback error:', status.error);
+                    console.error('Video URI being used:', selectedVideo);
                     Alert.alert('Error', 'Video playback failed.');
                   }
                 }}

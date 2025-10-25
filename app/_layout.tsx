@@ -34,7 +34,6 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="splash" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="camera" />
         <Stack.Screen name="preview" />
         <Stack.Screen name="processing" />
         <Stack.Screen name="feedback" />
