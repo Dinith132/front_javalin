@@ -1,3 +1,4 @@
+import { aiAnalysisEngine } from '@/components/AIAnalysisEngine';
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Platform, BackHandler } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,15 +11,23 @@ import * as Haptics from 'expo-haptics';
 import { BASE_URL } from '@/src/config';
 import axios from 'axios';
 
+interface UploadProgress {
+  loaded: number;
+  total: number;
+}
+
 export default function PreviewScreen() {
-  const { videoUri } = useLocalSearchParams();
-  const [selectedVideo, setSelectedVideo] = useState<string | null>(videoUri as string || null);
+  const { videoUri } = useLocalSearchParams<{ videoUri?: string }>();
+  const [selectedVideo, setSelectedVideo] = useState<string | null>(videoUri || null);
   const [isLoading, setIsLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [disableControls, setDisableControls] = useState(false);
+  const [processingCount, setProcessingCount] = useState(0); // Track processing videos
   const videoRef = useRef<Video>(null);
+  const abortController = useRef<AbortController | null>(null);
+  const MAX_PROCESSING = 1; // Limit to 1 video at a time
 
   // 🔹 Handle hardware back button
   useEffect(() => {
@@ -34,7 +43,7 @@ export default function PreviewScreen() {
     if (!videoUri) {
       pickVideo();
     } else {
-      const decodedUri = decodeURIComponent(videoUri as string);
+      const decodedUri = decodeURIComponent(videoUri);
       const finalUri = Platform.OS === 'android' && !decodedUri.startsWith('file://')
         ? `file://${decodedUri}`
         : decodedUri;
@@ -53,11 +62,37 @@ export default function PreviewScreen() {
       }
     }
     setIsPlaying(false);
-    setSelectedVideo(null);
+    setSelectedVideo(null); // Ensure selectedVideo is cleared
   };
 
+  // Cleanup on unmount
+  useEffect(() => {
+    const controller = new AbortController();
+    abortController.current = controller;
+
+    return () => {
+      // Abort any ongoing uploads
+      if (abortController.current) {
+        abortController.current.abort();
+      }
+      // Unload video
+      unloadVideo();
+      // Revoke the object URL if the video was loaded from the web
+      if (selectedVideo && selectedVideo.startsWith('blob:')) {
+        URL.revokeObjectURL(selectedVideo);
+      }
+    };
+    aiAnalysisEngine.dispose(); // Dispose of the AI engine
+  }, []);
+  aiAnalysisEngine.dispose(); // Dispose of the AI engine
+
   const pickVideo = async () => {
-    await unloadVideo();
+    // Prevent picking a new video if the processing limit is reached to avoid memory issues
+    if (processingCount >= MAX_PROCESSING) {
+      Alert.alert('Limit Reached', 'Please wait for the current video to finish processing.');
+      return;
+    }
+    await unloadVideo(); // Ensure previous video resources are released
 
     if (Platform.OS === 'web') {
       const input = document.createElement('input');
@@ -68,6 +103,10 @@ export default function PreviewScreen() {
         if (file) {
           const uri = URL.createObjectURL(file);
           setSelectedVideo(uri);
+          // Revoke the object URL when the video is no longer needed
+          input.onload = () => {
+            URL.revokeObjectURL(uri);
+          };
         } else {
           router.back();
         }
@@ -86,7 +125,7 @@ export default function PreviewScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      mediaTypes: 'videos',
       allowsEditing: true,
       quality: 1,
       videoMaxDuration: 30,
@@ -131,7 +170,13 @@ export default function PreviewScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
 
+    // Abort any previous upload
+    if (abortController.current) {
+      abortController.current.abort();
+    }
+
     setIsLoading(true);
+    setProcessingCount(prevCount => prevCount + 1); // Increment processing count to limit simultaneous uploads
     setStatusMessage('Uploading video...');
     setProgress(0);
 
@@ -169,10 +214,15 @@ export default function PreviewScreen() {
         } as any);
       }
 
+      // Create new abort controller for this upload
+      const controller = new AbortController();
+      abortController.current = controller;
+
       const response = await axios.post(`${BASE_URL}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 300000,
-        onUploadProgress: (progressEvent) => {
+        signal: abortController.current.signal,
+        onUploadProgress: (progressEvent: { loaded: number; total?: number }) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
           setProgress(percentCompleted);
         },
@@ -188,12 +238,17 @@ export default function PreviewScreen() {
         throw new Error('Unexpected response status');
       }
     } catch (error: any) {
-      console.error('Upload error:', error);
-      setStatusMessage('');
-      Alert.alert('Upload Failed', error.response?.data?.error || error.message || 'Error uploading video.');
+      if (axios.isCancel(error)) {
+        console.log('Upload cancelled');
+      } else {
+        console.error('Upload error:', error);
+        setStatusMessage('');
+        Alert.alert('Upload Failed', error.response?.data?.error || error.message || 'Error uploading video.');
+      }
     } finally {
       setIsLoading(false);
       setProgress(0);
+      setProcessingCount(prevCount => prevCount - 1); // Decrement processing count after upload completes
     }
   };
 
@@ -212,7 +267,6 @@ export default function PreviewScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <ArrowLeft size={24} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={styles.title}>Preview Video</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -226,11 +280,11 @@ export default function PreviewScreen() {
                 resizeMode={ResizeMode.CONTAIN}
                 shouldPlay={isPlaying}
                 isLooping={true}
-                onPlaybackStatusUpdate={(status) => {
+                onPlaybackStatusUpdate={(status: any) => {
                   if ('isPlaying' in status) setIsPlaying(status.isPlaying || false);
                   if (status.isLoaded === false && status.error) {
                     console.error('Video playback error:', status.error);
-                    Alert.alert('Error', 'Video playback failed.');
+                    Alert.alert('Video Playback Error', 'Failed to play video');
                   }
                 }}
               />
@@ -257,7 +311,7 @@ export default function PreviewScreen() {
                 <View style={styles.progressBar}>
                   <View style={[styles.progressFill, { width: `${progress / 2}%` }]} />
                 </View>
-                <Text style={styles.progressText}>{progress / 2}%</Text>
+                <Text style={styles.progressText}>{progress > 0 ? `${progress / 2}%` : ''}</Text>
               </View>
             )}
           </View>
@@ -286,7 +340,6 @@ export default function PreviewScreen() {
     </LinearGradient>
   );
 }
-
 
 
 const styles = StyleSheet.create({
@@ -376,7 +429,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontFamily: 'Inter-SemiBold',
     color: '#ffffff',
-    marginBottom: 8,
   },
   infoText: {
     fontSize: 14,

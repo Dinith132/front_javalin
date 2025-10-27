@@ -3,6 +3,8 @@
  * Integrates TensorFlow Lite with MediaPipe Pose Detection
  */
 
+import { useEffect } from 'react';
+
 export interface PoseLandmark {
   x: number;
   y: number;
@@ -34,29 +36,35 @@ export interface BoundingBox {
   confidence: number;
 }
 
+// Define types for the TFLite model and PoseDetector
+interface TensorFlowLiteModel {
+  loaded: boolean; // Add more properties as needed for the actual model
+}
+
+interface PoseDetector {
+  initialized: boolean; // Add more properties as needed for the actual detector
+}
+
 export class AIAnalysisEngine {
   private isInitialized = false;
-  private model: any = null;
-  private poseDetector: any = null;
+  private model: TensorFlowLiteModel | null = null;
+  private poseDetector: PoseDetector | null = null;
+  private timeoutIds: NodeJS.Timeout[] = [];
 
   /**
    * Initialize the AI analysis engine with TensorFlow Lite model
    */
   async initialize(): Promise<void> {
     try {
-      // In a real implementation, you would load the actual TFLite model
-      // and initialize MediaPipe Pose
       console.log('Initializing AI Analysis Engine...');
-      
-      // Mock initialization - replace with actual model loading
       await this.loadTensorFlowLiteModel();
       await this.initializeMediaPipePose();
-      
       this.isInitialized = true;
       console.log('AI Analysis Engine initialized successfully');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to initialize AI Analysis Engine:', error);
-      throw error;
+      this.isInitialized = false;
+      throw new Error(`AI Engine initialization failed: ${error.message}`);
     }
   }
 
@@ -64,28 +72,42 @@ export class AIAnalysisEngine {
    * Load the pre-trained TensorFlow Lite model
    */
   private async loadTensorFlowLiteModel(): Promise<void> {
-    // Mock model loading - in production, you would:
-    // 1. Load the .tflite model file from assets
-    // 2. Initialize TensorFlow Lite interpreter
-    // 3. Set up input/output tensors
-    
     console.log('Loading TensorFlow Lite model...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    this.model = { loaded: true }; // Mock model
+    try {
+      // Simulate model loading with a timeout
+      await new Promise((resolve, reject) => {
+        const timeoutId: NodeJS.Timeout = setTimeout(() => {
+          this.model = { loaded: true }; // Mock model
+          console.log('TensorFlow Lite model loaded (mock)');
+          resolve(undefined);
+        }, 1000) as any;
+        this.timeoutIds.push(timeoutId);
+      });
+    } catch (error: any) {
+      console.error('Failed to load TensorFlow Lite model:', error);
+      throw new Error(`TFLite model loading failed: ${error.message}`);
+    }
   }
 
   /**
    * Initialize MediaPipe Pose detector
    */
   private async initializeMediaPipePose(): Promise<void> {
-    // Mock MediaPipe initialization - in production, you would:
-    // 1. Initialize MediaPipe Pose solution
-    // 2. Configure pose detection parameters
-    // 3. Set up pose landmark extraction
-    
     console.log('Initializing MediaPipe Pose...');
-    await new Promise(resolve => setTimeout(resolve, 500));
-    this.poseDetector = { initialized: true }; // Mock detector
+    try {
+      // Simulate MediaPipe initialization with a timeout
+      await new Promise((resolve, reject) => {
+        const timeoutId: NodeJS.Timeout = setTimeout(() => {
+          this.poseDetector = { initialized: true }; // Mock detector
+          console.log('MediaPipe Pose initialized (mock)');
+          resolve(undefined);
+        }, 500) as any;
+        this.timeoutIds.push(timeoutId);
+      });
+    } catch (error: any) {
+      console.error('Failed to initialize MediaPipe Pose:', error);
+      throw new Error(`MediaPipe Pose initialization failed: ${error.message}`);
+    }
   }
 
   /**
@@ -96,22 +118,34 @@ export class AIAnalysisEngine {
       throw new Error('AI Analysis Engine not initialized');
     }
 
-    // Mock YOLOv8 detection - in production, you would:
-    // 1. Run YOLOv8 inference on the frame
-    // 2. Filter for person class detections
-    // 3. Return the highest confidence bounding box
-    
     console.log('Detecting athlete with YOLOv8...');
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Mock detection result
-    return {
-      x: 0.25,
-      y: 0.15,
-      width: 0.5,
-      height: 0.7,
-      confidence: 0.92
-    };
+    try {
+      // Simulate YOLOv8 detection with a timeout
+      await new Promise((resolve, reject) => {
+        const timeoutId: NodeJS.Timeout = setTimeout(() => {
+          // Mock detection result
+          const bbox: BoundingBox = {
+            x: 0.25,
+            y: 0.15,
+            width: 0.5,
+            height: 0.7,
+            confidence: 0.92
+          };
+          resolve(bbox);
+        }, 100) as any;
+        this.timeoutIds.push(timeoutId);
+      });
+      return {
+        x: 0.25,
+        y: 0.15,
+        width: 0.5,
+        height: 0.7,
+        confidence: 0.92
+      };
+    } catch (error: any) {
+      console.error('Athlete detection failed:', error);
+      return null; // Indicate detection failure
+    }
   }
 
   /**
@@ -122,21 +156,32 @@ export class AIAnalysisEngine {
       throw new Error('AI Analysis Engine not initialized');
     }
 
-    // Mock pose extraction - in production, you would:
-    // 1. Run MediaPipe Pose on cropped athlete image
-    // 2. Extract 33 pose landmarks
-    // 3. Return normalized coordinates
-    
     console.log('Extracting pose landmarks...');
-    await new Promise(resolve => setTimeout(resolve, 150));
-    
-    // Mock pose landmarks (33 MediaPipe pose points)
-    return Array.from({ length: 33 }, (_, index) => ({
-      x: 0.3 + (Math.random() * 0.4),
-      y: 0.2 + (Math.random() * 0.6),
-      z: Math.random() * 0.5,
-      visibility: 0.7 + (Math.random() * 0.3)
-    }));
+    try {
+      // Simulate pose extraction with a timeout
+      await new Promise((resolve, reject) => {
+        const timeoutId: NodeJS.Timeout = setTimeout(() => {
+          // Mock pose landmarks (33 MediaPipe pose points)
+          const landmarks: PoseLandmark[] = Array.from({ length: 33 }, (_, index) => ({
+            x: 0.3 + (Math.random() * 0.4),
+            y: 0.2 + (Math.random() * 0.6),
+            z: Math.random() * 0.5,
+            visibility: 0.7 + (Math.random() * 0.3)
+          }));
+          resolve(landmarks);
+        }, 150) as any;
+        this.timeoutIds.push(timeoutId);
+      });
+      return Array.from({ length: 33 }, (_, index) => ({
+        x: 0.3 + (Math.random() * 0.4),
+        y: 0.2 + (Math.random() * 0.6),
+        z: Math.random() * 0.5,
+        visibility: 0.7 + (Math.random() * 0.3)
+      }));
+    } catch (error: any) {
+      console.error('Pose landmark extraction failed:', error);
+      return []; // Indicate extraction failure
+    }
   }
 
   /**
@@ -152,59 +197,71 @@ export class AIAnalysisEngine {
     }
 
     console.log('Analyzing technique with neural network...');
-    
-    // Mock neural network inference - in production, you would:
-    // 1. Prepare input tensor (20 frames × 237 features)
-    // 2. Run CNN + BiGRU + Attention model
-    // 3. Get 4-class prediction probabilities
-    
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Mock analysis results
-    const predictions = [
-      { class: 'Good Technique', probability: 0.12 },
-      { class: 'Low Arm', probability: 0.75 },
-      { class: 'Poor Left Leg Block', probability: 0.08 },
-      { class: 'Both Errors', probability: 0.05 }
-    ];
-    
-    const topPrediction = predictions.reduce((prev, current) => 
-      current.probability > prev.probability ? current : prev
-    );
-    
-    // Add correctness flags to pose landmarks
-    const enhancedPoseData = poseSequence.map(frame => ({
-      ...frame,
-      landmarks: frame.landmarks.map((landmark, index) => ({
-        ...landmark,
-        isCorrect: this.evaluateJointCorrectness(index, topPrediction.class, landmark)
-      }))
-    }));
-    
-    return {
-      prediction: topPrediction.class as any,
-      confidence: topPrediction.probability,
-      probabilities: Object.fromEntries(
-        predictions.map(p => [p.class, p.probability])
-      ),
-      poseData: enhancedPoseData,
-      analysisId: this.generateAnalysisId(),
-      timestamp: Date.now()
-    };
+    try {
+      // Simulate neural network inference with a timeout
+      await new Promise((resolve, reject) => {
+        const timeoutId: NodeJS.Timeout = setTimeout(() => {
+          // Mock analysis results
+          const predictions = [
+            { class: 'Good Technique', probability: 0.12 },
+            { class: 'Low Arm', probability: 0.75 },
+            { class: 'Poor Left Leg Block', probability: 0.08 },
+            { class: 'Both Errors', probability: 0.05 }
+          ];
+
+          const topPrediction = predictions.reduce((prev, current) =>
+            current.probability > prev.probability ? current : prev
+          );
+
+          // Add correctness flags to pose landmarks
+          const enhancedPoseData = poseSequence.map(frame => ({
+            ...frame,
+            landmarks: frame.landmarks.map((landmark, index) => ({
+              ...landmark,
+              isCorrect: this.evaluateJointCorrectness(index, topPrediction.class, landmark)
+            }))
+          }));
+
+          const result: AnalysisResult = {
+            prediction: topPrediction.class as any,
+            confidence: topPrediction.probability,
+            probabilities: Object.fromEntries(
+              predictions.map(p => [p.class, p.probability])
+            ),
+            poseData: enhancedPoseData,
+            analysisId: this.generateAnalysisId(),
+            timestamp: Date.now()
+          };
+          resolve(result);
+        }, 800) as any;
+        this.timeoutIds.push(timeoutId);
+      });
+      return {
+        prediction: 'Low Arm',
+        confidence: 0.75,
+        probabilities: { 'Good Technique': 0.12, 'Low Arm': 0.75, 'Poor Left Leg Block': 0.08, 'Both Errors': 0.05 },
+        poseData: [],
+        analysisId: 'mock_analysis_id',
+        timestamp: Date.now()
+      };
+    } catch (error: any) {
+      console.error('Technique analysis failed:', error);
+      throw new Error(`Technique analysis failed: ${error.message}`);
+    }
   }
 
   /**
    * Evaluate if a specific joint position is correct based on the prediction
    */
   private evaluateJointCorrectness(
-    jointIndex: number, 
-    prediction: string, 
+    jointIndex: number,
+    prediction: string,
     landmark: PoseLandmark
   ): boolean {
     // Joint indices for MediaPipe Pose (simplified mapping)
     const armJoints = [11, 12, 13, 14, 15, 16]; // Shoulders, elbows, wrists
     const legJoints = [23, 24, 25, 26, 27, 28]; // Hips, knees, ankles
-    
+
     switch (prediction) {
       case 'Low Arm':
         return !armJoints.includes(jointIndex);
@@ -212,8 +269,8 @@ export class AIAnalysisEngine {
         // Left leg joints (odd indices in leg joints)
         return !(legJoints.includes(jointIndex) && jointIndex % 2 === 1);
       case 'Both Errors':
-        return !(armJoints.includes(jointIndex) || 
-                (legJoints.includes(jointIndex) && jointIndex % 2 === 1));
+        return !(armJoints.includes(jointIndex) ||
+          (legJoints.includes(jointIndex) && jointIndex % 2 === 1));
       case 'Good Technique':
       default:
         return true;
@@ -232,30 +289,35 @@ export class AIAnalysisEngine {
    */
   async processVideo(videoUri: string): Promise<AnalysisResult> {
     if (!this.isInitialized) {
-      await this.initialize();
+      try {
+        await this.initialize();
+      } catch (error) {
+        console.error('Failed to initialize engine before processing video:', error);
+        throw error; // Re-throw to prevent further processing
+      }
     }
 
     console.log('Starting video analysis pipeline...');
-    
+
     try {
       // Step 1: Extract frames from video
       const frames = await this.extractVideoFrames(videoUri);
       console.log(`Extracted ${frames.length} frames`);
-      
+
       // Step 2: Detect athlete in each frame
-      const athleteDetections: Array<{frame: number, bbox: BoundingBox | null}> = [];
+      const athleteDetections: Array<{ frame: number, bbox: BoundingBox | null }> = [];
       for (let i = 0; i < frames.length; i++) {
         const bbox = await this.detectAthlete(frames[i]);
         athleteDetections.push({ frame: i, bbox });
       }
-      
+
       // Step 3: Extract pose sequence from detected athlete regions
       const poseSequence: PoseFrame[] = [];
       for (const detection of athleteDetections) {
         if (detection.bbox) {
           const croppedFrame = this.cropFrame(frames[detection.frame], detection.bbox);
           const landmarks = await this.extractPoseLandmarks(croppedFrame);
-          
+
           poseSequence.push({
             frame: detection.frame,
             landmarks,
@@ -263,21 +325,21 @@ export class AIAnalysisEngine {
           });
         }
       }
-      
+
       // Step 4: Analyze technique using neural network
       if (poseSequence.length >= 20) {
         // Take the most relevant 20 frames (middle portion of throw)
         const startIndex = Math.max(0, Math.floor((poseSequence.length - 20) / 2));
         const relevantFrames = poseSequence.slice(startIndex, startIndex + 20);
-        
+
         return await this.analyzeTechnique(relevantFrames);
       } else {
         throw new Error('Insufficient pose data for analysis');
       }
-      
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Video analysis failed:', error);
-      throw error;
+      throw new Error(`Video analysis failed: ${error.message}`);
     }
   }
 
@@ -285,16 +347,22 @@ export class AIAnalysisEngine {
    * Extract frames from video (mock implementation)
    */
   private async extractVideoFrames(videoUri: string): Promise<string[]> {
-    // Mock frame extraction - in production, you would:
-    // 1. Use FFmpeg or native video processing
-    // 2. Extract frames at regular intervals
-    // 3. Return frame data as ImageData or base64 strings
-    
     console.log('Extracting video frames...');
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Mock 60 frames
-    return Array.from({ length: 60 }, (_, i) => `frame_${i}`);
+    try {
+      // Simulate frame extraction with a timeout
+      await new Promise((resolve, reject) => {
+        const timeoutId: NodeJS.Timeout = setTimeout(() => {
+          // Mock 60 frames
+          const frames: string[] = Array.from({ length: 60 }, (_, i) => `frame_${i}`);
+          resolve(frames);
+        }, 500) as any;
+        this.timeoutIds.push(timeoutId);
+      });
+      return Array.from({ length: 60 }, (_, i) => `frame_${i}`);
+    } catch (error: any) {
+      console.error('Frame extraction failed:', error);
+      return []; // Indicate extraction failure
+    }
   }
 
   /**
@@ -304,17 +372,20 @@ export class AIAnalysisEngine {
     // Mock frame cropping - in production, you would:
     // 1. Apply bounding box coordinates to crop the image
     // 2. Return cropped image data
-    
+
     return `cropped_${frame}`;
   }
 
   /**
    * Clean up resources
    */
-  dispose(): void {
-    this.model = null;
-    this.poseDetector = null;
-    this.isInitialized = false;
+ dispose(): void {
+   // Clear all timeouts to prevent memory leaks
+   this.timeoutIds.forEach(clearTimeout);
+   this.timeoutIds = [];
+   this.model = null; // Release model reference
+   this.poseDetector = null; // Release pose detector reference
+   this.isInitialized = false; // Reset initialization flag
     console.log('AI Analysis Engine disposed');
   }
 }

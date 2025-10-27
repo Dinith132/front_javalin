@@ -15,6 +15,7 @@ export default function ProcessingScreen() {
   const [currentStep, setCurrentStep] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
   const scaleValue = useRef(new Animated.Value(1)).current;
+  const abortController = useRef<AbortController | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>('Processing your throw...');
 
   const steps = [
@@ -55,46 +56,60 @@ export default function ProcessingScreen() {
   useEffect(() => {
     if (!fileId || !statusUrl) return;
 
+    // Create new abort controller for this request
+    abortController.current = new AbortController();
+
     const checkStatus = async () => {
       try {
+        if (!abortController.current) return;
+        
         const response = await axios.get(`${BASE_URL}${statusUrl}`, {
           headers: { 'ngrok-skip-browser-warning': 'true' },
+          signal: abortController.current.signal,
         });
 
         if (response.data.status === 'completed') {
           const results = response.data.result;
           const DownloadUrl = `${BASE_URL}${response.data.video_url}`;
           setStatusMessage('Processing complete!');
-
+    
           if (!hasNavigated.current) {
             hasNavigated.current = true;
+            // Clean up resources before navigation
+            if (statusInterval.current) clearInterval(statusInterval.current);
+            if (abortController.current) abortController.current.abort();
+            aiAnalysisEngine.dispose();
+    
             router.push({
               pathname: '/feedback',
               params: { videoUri: DownloadUrl, results: JSON.stringify(results) },
             });
-            aiAnalysisEngine.dispose();
-            if (statusInterval.current) clearInterval(statusInterval.current);
           }
         } else if (response.data.status === 'processing') {
           setStatusMessage(response.data.message);
         }
       } catch (error: any) {
-        console.error('Status check error:', error);
-        if (!hasNavigated.current) {
-          Alert.alert(
-            'Processing Failed',
-            error.response?.data?.error || error.message || 'There was an error processing your video.',
-            [{ text: 'OK', onPress: () => router.push('/preview') }]
-          );
-          hasNavigated.current = true;
+        if (!axios.isCancel(error)) {
+          console.error('Status check error:', error);
+          if (!hasNavigated.current) {
+            Alert.alert(
+              'Processing Failed',
+              error.response?.data?.error || error.message || 'There was an error processing your video.',
+              [{ text: 'OK', onPress: () => router.push('/preview') }]
+            );
+            hasNavigated.current = true;
+          }
         }
         if (statusInterval.current) clearInterval(statusInterval.current);
       }
     };
 
     statusInterval.current = setInterval(checkStatus, 2000) as unknown as number;
+
     return () => {
-      if (statusInterval.current) clearInterval(statusInterval.current as number);
+      // Clean up resources on unmount
+      if (statusInterval.current) clearInterval(statusInterval.current);
+      if (abortController.current) abortController.current.abort();
       if (!hasNavigated.current) aiAnalysisEngine.dispose();
     };
   }, [fileId, statusUrl]);
