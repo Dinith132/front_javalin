@@ -17,7 +17,6 @@ export default function CameraScreen() {
   const cameraRef = useRef<CameraView | null>(null);
   const recordingPromiseRef = useRef<Promise<{ uri: string } | undefined> | null>(null);
   const startTimeRef = useRef<number | null>(null);
-  // Add a state for camera key to force remount
   const [cameraKey, setCameraKey] = useState(Date.now().toString());
 
   const handleCameraReady = useCallback(() => {
@@ -30,6 +29,7 @@ export default function CameraScreen() {
     useCallback(() => {
       console.log('CameraScreen focused, resetting camera state');
       setCameraReady(false);
+      setIsRecording(false); // Ensure recording state is reset
       setCameraKey(Date.now().toString()); // Force CameraView remount
       return () => {
         console.log('CameraScreen unfocused, cleaning up');
@@ -107,13 +107,39 @@ export default function CameraScreen() {
   const safeReleaseCamera = async () => {
     try {
       if (!cameraRef.current) return;
-      console.log('Pausing preview to release camera resources...');
+      console.log('Releasing camera resources...');
+
+      // Stop recording if active
+      if (isRecording) {
+        console.log('Stopping active recording before releasing camera');
+        try {
+          await cameraRef.current.stopRecording?.();
+          if (recordingPromiseRef.current) {
+            try {
+              await recordingPromiseRef.current;
+              console.log('Recording stopped and promise resolved');
+            } catch (e) {
+              console.warn('Error resolving recording promise:', e);
+            }
+          }
+        } catch (err) {
+          console.warn('Error stopping recording:', err);
+        } finally {
+          setIsRecording(false);
+          recordingPromiseRef.current = null;
+          startTimeRef.current = null;
+        }
+      }
+
+      // Pause preview
+      console.log('Pausing preview...');
       await cameraRef.current.pausePreview?.();
     } catch (err) {
       console.warn('Error pausing preview (ignored):', err);
     } finally {
       cameraRef.current = null;
       setCameraReady(false);
+      setIsRecording(false); // Ensure recording state is reset
       console.log('Camera ref cleared');
     }
   };
@@ -261,7 +287,7 @@ export default function CameraScreen() {
       }
     } catch (err) {
       console.error('Stop recording error:', err);
-      Alert.alert('Error', 'Failed to record video. Make sure you record at least 1 second.');
+      Alert.alert('Error', 'Failed to record video. Make sure you record for at least 1 second.');
       setIsRecording(false);
       recordingPromiseRef.current = null;
       startTimeRef.current = null;
@@ -272,7 +298,7 @@ export default function CameraScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <CameraView
-          key={cameraKey} // Use cameraKey to force remount
+          key={cameraKey}
           style={styles.camera}
           facing={facing}
           mode="video"
@@ -297,13 +323,13 @@ export default function CameraScreen() {
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
               <Text style={styles.title}>Record Throw</Text>
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 style={styles.flipButton}
                 onPress={toggleCameraFacing}
                 disabled={!cameraReady}
               >
                 <RotateCcw size={24} color={cameraReady ? '#ffffff' : '#666666'} />
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
 
             <View style={styles.centerOverlay}>
