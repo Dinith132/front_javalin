@@ -17,43 +17,48 @@ export default function PreviewScreen() {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [progress, setProgress] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [disableControls, setDisableControls] = useState(false); // 👈 new state
+  const [disableControls, setDisableControls] = useState(false);
   const videoRef = useRef<Video>(null);
 
   // 🔹 Handle hardware back button
   useEffect(() => {
     const backAction = () => {
       router.replace('/');
-      return true; // Prevent default behavior
+      return true;
     };
-
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-
     return () => backHandler.remove();
   }, []);
 
   useEffect(() => {
-    console.log('Preview component mounted, videoUri:', videoUri);
     if (!videoUri) {
-      console.log('No videoUri provided, picking video');
       pickVideo();
     } else {
-      console.log('VideoUri provided:', videoUri);
-      // Decode the URI if it's URL-encoded
       const decodedUri = decodeURIComponent(videoUri as string);
-      console.log('Decoded videoUri:', decodedUri);
-
-      // For Android, ensure proper file:// protocol
       const finalUri = Platform.OS === 'android' && !decodedUri.startsWith('file://')
         ? `file://${decodedUri}`
         : decodedUri;
-
-      console.log('Final videoUri for preview:', finalUri);
       setSelectedVideo(finalUri);
     }
   }, [videoUri]);
 
+  // 🔹 Helper to safely unload video
+  const unloadVideo = async () => {
+    if (videoRef.current) {
+      try {
+        await videoRef.current.stopAsync();
+        await videoRef.current.unloadAsync(); // Release native memory
+      } catch (error) {
+        console.error('Error unloading video:', error);
+      }
+    }
+    setIsPlaying(false);
+    setSelectedVideo(null);
+  };
+
   const pickVideo = async () => {
+    await unloadVideo();
+
     if (Platform.OS === 'web') {
       const input = document.createElement('input');
       input.type = 'file';
@@ -73,14 +78,10 @@ export default function PreviewScreen() {
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Permission Required',
-        'We need access to your photos to select a video for analysis.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Settings', onPress: () => {} },
-        ]
-      );
+      Alert.alert('Permission Required', 'We need access to your photos to select a video.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Settings', onPress: () => {} },
+      ]);
       return;
     }
 
@@ -124,16 +125,7 @@ export default function PreviewScreen() {
       return;
     }
 
-    // 👇 Stop video and disable controls
-    if (videoRef.current) {
-      try {
-        await videoRef.current.stopAsync();
-        setIsPlaying(false);
-        setDisableControls(true);
-      } catch (error) {
-        console.error('Error stopping video:', error);
-      }
-    }
+    await unloadVideo(); // Ensure previous video resources are released
 
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -177,8 +169,6 @@ export default function PreviewScreen() {
         } as any);
       }
 
-      console.log('Uploading video:', { uri: selectedVideo, mimeType, fileName });
-
       const response = await axios.post(`${BASE_URL}/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 300000,
@@ -190,10 +180,9 @@ export default function PreviewScreen() {
 
       if (response.status === 202) {
         setStatusMessage(response.data.message);
-        Alert.alert('Success', response.data.message);
         router.push({
           pathname: '/processing',
-          params: { videoUri: selectedVideo, fileId: response.data.file_id, statusUrl: response.data.status_url }
+          params: { videoUri: selectedVideo, fileId: response.data.file_id, statusUrl: response.data.status_url },
         });
       } else {
         throw new Error('Unexpected response status');
@@ -201,28 +190,18 @@ export default function PreviewScreen() {
     } catch (error: any) {
       console.error('Upload error:', error);
       setStatusMessage('');
-      Alert.alert(
-        'Upload Failed',
-        error.response?.data?.error || error.message || 'There was an error uploading your video.',
-        [{ text: 'OK', onPress: () => {} }]
-      );
+      Alert.alert('Upload Failed', error.response?.data?.error || error.message || 'Error uploading video.');
     } finally {
       setIsLoading(false);
       setProgress(0);
     }
   };
 
-  const selectDifferentVideo = () => {
-    if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
+  const selectDifferentVideo = async () => {
+    await unloadVideo(); // Release current video
     setStatusMessage('');
     setProgress(0);
-    setIsPlaying(false);
-    setDisableControls(false); // 👈 re-enable controls
-    if (videoRef.current) {
-      videoRef.current.stopAsync().catch((error) => console.error('Stop video error:', error));
-    }
+    setDisableControls(false);
     pickVideo();
   };
 
@@ -248,13 +227,9 @@ export default function PreviewScreen() {
                 shouldPlay={isPlaying}
                 isLooping={true}
                 onPlaybackStatusUpdate={(status) => {
-                  console.log('Video playback status:', status);
-                  if ('isPlaying' in status) {
-                    setIsPlaying(status.isPlaying || false);
-                  }
+                  if ('isPlaying' in status) setIsPlaying(status.isPlaying || false);
                   if (status.isLoaded === false && status.error) {
                     console.error('Video playback error:', status.error);
-                    console.error('Video URI being used:', selectedVideo);
                     Alert.alert('Error', 'Video playback failed.');
                   }
                 }}
@@ -276,10 +251,7 @@ export default function PreviewScreen() {
 
           <View style={styles.infoContainer}>
             <Text style={styles.infoTitle}>Ready for Analysis</Text>
-            <Text style={styles.infoText}>
-              {statusMessage ||
-                'Our AI will analyze your javelin throw technique and provide detailed feedback on your form, arm position, and leg blocking.'}
-            </Text>
+            <Text style={styles.infoText}>{statusMessage || 'Our AI will analyze your javelin throw.'}</Text>
             {isLoading && (
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
@@ -300,9 +272,7 @@ export default function PreviewScreen() {
                 colors={!selectedVideo || isLoading ? ['#94a3b8', '#94a3b8'] : ['#3182ce', '#2563eb']}
                 style={styles.buttonGradient}
               >
-                <Text style={styles.primaryButtonText}>
-                  {isLoading ? 'Uploading...' : 'Upload and Analyze'}
-                </Text>
+                <Text style={styles.primaryButtonText}>{isLoading ? 'Uploading...' : 'Upload and Analyze'}</Text>
               </LinearGradient>
             </TouchableOpacity>
 
@@ -316,6 +286,8 @@ export default function PreviewScreen() {
     </LinearGradient>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: {

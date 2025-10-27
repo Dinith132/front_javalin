@@ -30,26 +30,25 @@ export default function FeedbackScreen() {
   const [cachedVideoUri, setCachedVideoUri] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isVideoLoading, setIsVideoLoading] = useState(true); // New state for video loading
+  const [isVideoLoading, setIsVideoLoading] = useState(true);
   const videoRef = useRef<Video>(null);
 
-  // Stabilize videoUri and results
   const videoUriString = useMemo(
     () => Array.isArray(videoUri) ? videoUri[0] : videoUri,
     [videoUri]
   );
+
   const analysisResults: AnalysisResults | null = useMemo(
     () => results ? JSON.parse(results as string) : null,
     [results]
   );
 
-  // 🔹 Cache video with unique filename
+  // 🔹 Cache video safely
   useEffect(() => {
     const cacheVideo = async () => {
       try {
         if (!videoUriString) return;
 
-        // Generate unique filename from the URL (safe for cache)
         const fileName = videoUriString.split('/').pop()?.split('?')[0] || 'video.mp4';
         const localUri = `${FileSystem.cacheDirectory}${fileName}`;
 
@@ -71,13 +70,11 @@ export default function FeedbackScreen() {
               setDownloadProgress(progress);
             }
           );
-          const downloadResult = await downloadResumable.downloadAsync();
-          if (downloadResult && downloadResult.uri) {
-            setCachedVideoUri(downloadResult.uri);
-          } else {
-            console.error("Download failed or returned no URI.");
-            setCachedVideoUri(videoUriString); // Fallback to original URI
-          }
+
+          // ✅ Safe download with TypeScript check
+          const result = await downloadResumable.downloadAsync();
+          setCachedVideoUri(result?.uri ?? videoUriString); // fallback if undefined
+
           setIsDownloading(false);
           setIsVideoLoading(false);
         }
@@ -88,8 +85,17 @@ export default function FeedbackScreen() {
         setIsVideoLoading(false);
       }
     };
+
     cacheVideo();
-  }, [videoUriString]);
+    return () => {
+      // Clean up cached video file
+      if (cachedVideoUri) {
+        FileSystem.deleteAsync(cachedVideoUri, { idempotent: true })
+          .then(() => console.log('Cached video deleted:', cachedVideoUri))
+          .catch(error => console.error('Error deleting cached video:', error));
+      }
+    };
+  }, [videoUriString, cachedVideoUri]);
 
   // 🔹 Play audio feedback once
   useEffect(() => {
@@ -101,15 +107,13 @@ export default function FeedbackScreen() {
     }
   }, [analysisResults]);
 
-  // 🔹 Handle hardware back button
+  // 🔹 Hardware back button
   useEffect(() => {
     const backAction = () => {
       router.push('/');
-      return true; // Prevent default behavior
+      return true;
     };
-
     const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-
     return () => backHandler.remove();
   }, []);
 
@@ -181,11 +185,8 @@ export default function FeedbackScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     try {
-      if (isPlaying) {
-        await videoRef.current.pauseAsync();
-      } else {
-        await videoRef.current.playAsync();
-      }
+      if (isPlaying) await videoRef.current.pauseAsync();
+      else await videoRef.current.playAsync();
       setIsPlaying(!isPlaying);
     } catch (error) {
       console.error('Video toggle error:', error);
@@ -199,13 +200,9 @@ export default function FeedbackScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     try {
-      if (isFullscreen) {
-        await videoRef.current.dismissFullscreenPlayer();
-        setIsFullscreen(false);
-      } else {
-        await videoRef.current.presentFullscreenPlayer();
-        setIsFullscreen(true);
-      }
+      if (isFullscreen) await videoRef.current.dismissFullscreenPlayer();
+      else await videoRef.current.presentFullscreenPlayer();
+      setIsFullscreen(!isFullscreen);
     } catch (error) {
       console.error('Fullscreen toggle error:', error);
       Alert.alert('Error', 'Failed to toggle fullscreen mode.');
@@ -217,7 +214,7 @@ export default function FeedbackScreen() {
       Alert.alert('Error', 'No analysis results available to share.');
       return;
     }
-    if (!Sharing.isAvailableAsync()) {
+    if (!(await Sharing.isAvailableAsync())) {
       Alert.alert('Sharing not supported', 'Sharing is not available on web.');
       return;
     }
@@ -259,69 +256,51 @@ export default function FeedbackScreen() {
   const ResultIcon = getResultIcon(analysisResults.prediction);
   const resultColor = getResultColor(analysisResults.prediction);
 
+
   return (
     <LinearGradient colors={['#1a365d', '#2d5a87']} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.header}>
-
           <TouchableOpacity style={styles.backButton} onPress={() => router.push('/')}>
-            <ArrowLeft size={24} color="#ffffff" />
+            <ArrowLeft size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.title}>Analysis Results</Text>
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <View style={[styles.videoContainer, isFullscreen && { height: '100%' }]}>
-            {isDownloading ? (
+            {isDownloading || isVideoLoading ? (
               <View style={styles.loadingOverlay}>
-                <Text style={styles.loadingText}>Downloading Video...</Text>
-                <View style={styles.progressBarBackground}>
-                  <View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} />
-                </View>
-                <Text style={styles.loadingText}>{Math.round(downloadProgress * 100)}%</Text>
-              </View>
-            ) : isVideoLoading ? (
-              <View style={styles.loadingOverlay}>
-                <Text style={styles.loadingText}>Loading Video...</Text>
+                <Text style={styles.loadingText}>{isDownloading ? 'Downloading Video...' : 'Loading Video...'}</Text>
+                {isDownloading && (
+                  <View style={styles.progressBarBackground}>
+                    <View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} />
+                  </View>
+                )}
+                {isDownloading && <Text style={styles.loadingText}>{Math.round(downloadProgress * 100)}%</Text>}
               </View>
             ) : (
               <>
                 <Video
                   ref={videoRef}
-                  source={{ uri: cachedVideoUri || videoUriString }}
+                  source={{ uri: cachedVideoUri ? cachedVideoUri : videoUriString }}
                   style={styles.video}
                   resizeMode={ResizeMode.CONTAIN}
                   shouldPlay={isPlaying}
-                  isLooping={true}
-                  // Removed onLoadStart to prevent resetting loading state after caching
+                  isLooping
                   onLoad={() => setIsVideoLoading(false)}
-                  onError={(error) => {
-                    console.error('Video load error:', error);
-                    setIsVideoLoading(false);
-                    Alert.alert('Video Error', 'Failed to load video. Please try again.');
-                  }}
+                  onError={(err) => { console.error('Video error:', err); setIsVideoLoading(false); }}
                   onPlaybackStatusUpdate={(status) => {
-                    if ('isPlaying' in status) {
-                      setIsPlaying(status.isPlaying || false);
-                    }
-                    if (status.isLoaded && !status.isPlaying && status.positionMillis === status.durationMillis) {
-                      videoRef.current?.replayAsync().catch((error) => {
-                        console.error('Replay error:', error);
-                      });
-                    } else if ('error' in status && status.error) {
-                      console.error('Video playback error:', status.error);
-                      Alert.alert('Error', 'Video playback failed.');
-                      setIsVideoLoading(false); // Ensure loading state is reset on error
-                    }
+                    if ('isPlaying' in status) setIsPlaying(status.isPlaying || false);
                   }}
                 />
                 <View style={styles.videoOverlay}>
                   <View style={styles.controlsContainer}>
                     <TouchableOpacity style={styles.controlButton} onPress={toggleVideo}>
-                      {isPlaying ? <Pause size={24} color="#ffffff" /> : <Play size={24} color="#ffffff" />}
+                      {isPlaying ? <Pause size={24} color="#fff" /> : <Play size={24} color="#fff" />}
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
-                      {isFullscreen ? <Minimize2 size={24} color="#ffffff" /> : <Maximize2 size={24} color="#ffffff" />}
+                      {isFullscreen ? <Minimize2 size={24} color="#fff" /> : <Maximize2 size={24} color="#fff" />}
                     </TouchableOpacity>
                   </View>
                   <View style={styles.overlayInfo}>
@@ -332,32 +311,21 @@ export default function FeedbackScreen() {
             )}
           </View>
 
-          {/* Results Section */}
           <View style={styles.resultContainer}>
             <View style={[styles.resultHeader, { backgroundColor: resultColor }]}>
-              <ResultIcon size={32} color="#ffffff" />
+              <ResultIcon size={32} color="#fff" />
               <View style={styles.resultContent}>
                 <Text style={styles.resultTitle}>{analysisResults.prediction}</Text>
-                <Text style={styles.confidenceText}>
-                  {Math.round(analysisResults.confidence * 100)}% confidence
-                </Text>
+                <Text style={styles.confidenceText}>{Math.round(analysisResults.confidence * 100)}% confidence</Text>
               </View>
             </View>
 
             <View style={styles.feedbackSection}>
               <Text style={styles.feedbackTitle}>AI Feedback</Text>
-              <Text style={styles.feedbackText}>
-                {generateFeedbackText(analysisResults.prediction)}
-              </Text>
-              
-              <TouchableOpacity 
-                style={styles.audioButton}
-                onPress={isSpeaking ? stopAudioFeedback : playAudioFeedback}
-              >
+              <Text style={styles.feedbackText}>{generateFeedbackText(analysisResults.prediction)}</Text>
+              <TouchableOpacity style={styles.audioButton} onPress={isSpeaking ? stopAudioFeedback : playAudioFeedback}>
                 <Volume2 size={20} color="#3182ce" />
-                <Text style={styles.audioButtonText}>
-                  {isSpeaking ? 'Stop Speaking' : 'Play Audio Feedback'}
-                </Text>
+                <Text style={styles.audioButtonText}>{isSpeaking ? 'Stop Speaking' : 'Play Audio Feedback'}</Text>
               </TouchableOpacity>
             </View>
 
@@ -367,15 +335,7 @@ export default function FeedbackScreen() {
                 <View key={technique} style={styles.probabilityItem}>
                   <Text style={styles.techniqueLabel}>{technique}</Text>
                   <View style={styles.probabilityBar}>
-                    <View 
-                      style={[
-                        styles.probabilityFill,
-                        { 
-                          width: `${probability * 100}%`,
-                          backgroundColor: technique === analysisResults.prediction ? resultColor : '#64748b',
-                        }
-                      ]}
-                    />
+                    <View style={[styles.probabilityFill, { width: `${probability * 100}%`, backgroundColor: technique === analysisResults.prediction ? resultColor : '#64748b' }]} />
                   </View>
                   <Text style={styles.probabilityText}>{Math.round(probability * 100)}%</Text>
                 </View>
@@ -384,18 +344,17 @@ export default function FeedbackScreen() {
           </View>
         </ScrollView>
 
-        {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity style={styles.secondaryButton} onPress={shareResults}>
             <Share2 size={20} color="#3182ce" />
             <Text style={styles.secondaryButtonText}>Share</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.secondaryButton} onPress={downloadVideo}>
             <Download size={20} color="#3182ce" />
             <Text style={styles.secondaryButtonText}>Download</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity style={styles.secondaryButton} onPress={retryAnalysis}>
             <RotateCcw size={20} color="#3182ce" />
             <Text style={styles.secondaryButtonText}>Retry</Text>
@@ -405,6 +364,7 @@ export default function FeedbackScreen() {
     </LinearGradient>
   );
 }
+
 
 // Styles
 const styles = StyleSheet.create({
